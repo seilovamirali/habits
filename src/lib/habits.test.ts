@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   almatyToday, weekStart, computePoints, currentStreak, bestStreak, levelInfo,
-  completionPct, DAILY_TASKS, type Completion,
+  completionPct, ALL_TASKS, DAILY_TASKS, type Completion,
 } from "./habits";
 
 const day = (d: string, u = "u"): Completion[] => DAILY_TASKS.map((t) => ({ user_id: u, task_key: t.key, completed_on: d }));
@@ -36,6 +36,12 @@ describe("habits rules", () => {
   it("period % = (daily+weekly) / (7×days + 3×weeks)", () => {
     const list = day("2026-11-02").slice(0, 7);
     expect(completionPct(list, "2026-11-02", "2026-11-02")).toBe(70);
+  });
+  it("scores only active habits, so archiving one daily task changes the day", () => {
+    const tasks = ALL_TASKS.map((task) => task.key === "spanish" ? { ...task, archived: true } : task);
+    const list = day("2026-11-02").filter((row) => row.task_key !== "spanish");
+    expect(computePoints(list, "0000-01-01", "9999-12-31", tasks)).toBe(60 + 20);
+    expect(completionPct(list, "2026-11-02", "2026-11-02", tasks)).toBe(67);
   });
 });
 

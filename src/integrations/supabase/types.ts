@@ -168,12 +168,101 @@ export type Database = {
         }
         Relationships: []
       }
+      habits: {
+        Row: {
+          archived: boolean
+          created_at: string
+          created_by: string | null
+          description: string
+          emoji: string
+          key: string
+          kind: string
+          points: number
+          sort_order: number
+          title: string
+          weekly_target: number | null
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          emoji: string
+          key: string
+          kind: string
+          points?: number
+          sort_order?: number
+          title: string
+          weekly_target?: number | null
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          emoji?: string
+          key?: string
+          kind?: string
+          points?: number
+          sort_order?: number
+          title?: string
+          weekly_target?: number | null
+        }
+        Relationships: []
+      }
+      jawshan_assignments: {
+        Row: {
+          date: string
+          part_from: number
+          part_to: number
+          user_id: string
+        }
+        Insert: {
+          date: string
+          part_from: number
+          part_to: number
+          user_id: string
+        }
+        Update: {
+          date?: string
+          part_from?: number
+          part_to?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      jawshan_done: {
+        Row: {
+          created_at: string
+          date: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      ensure_jawshan_day: {
+        Args: { p_date: string }
+        Returns: {
+          date: string
+          part_from: number
+          part_to: number
+          user_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

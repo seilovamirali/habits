@@ -21,6 +21,8 @@ const TITLES: Record<string, string> = {
   "/profile": "Профиль — Habits",
   "/book": "Книга группы — Habits",
   "/reader": "Читать — Habits",
+  "/jawshan": "Джевшен — Habits",
+  "/manage": "Привычки — Habits",
 };
 
 function NotFoundComponent() {

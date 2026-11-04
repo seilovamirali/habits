@@ -2,10 +2,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { meQuery, useGroup, useToday } from "@/hooks/use-habits";
+import { meQuery, useGroup, useHabits, useToday } from "@/hooks/use-habits";
+import { useJawshan } from "@/hooks/use-jawshan";
 import { Bar } from "@/components/ProgressRing";
 import {
-  DAILY_TASKS, DAILY_COUNT, completionPct, computePoints, currentStreak, periodRange, type Period,
+  ALL_TASKS, activeDaily, completionPct, computePoints, currentStreak, periodRange, type Period,
 } from "@/lib/habits";
 
 export const Route = createFileRoute("/_authenticated/leaderboard")({
@@ -22,27 +23,33 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 function LeaderboardPage() {
   const { data: me } = useQuery(meQuery);
   const { data, isLoading } = useGroup();
+  const habitsQ = useHabits();
   const today = useToday();
+  const jawshan = useJawshan(today);
+  const tasks = habitsQ.data ?? ALL_TASKS;
+  const dailyTasks = activeDaily(tasks);
   const [period, setPeriod] = useState<Period>("week");
 
   const rows = useMemo(() => {
     if (!data) return [];
+    const dailyKeys = new Set(dailyTasks.map((task) => task.key));
     return data.profiles
       .map((p) => {
         const list = data.completions.filter((c) => c.user_id === p.id);
+        const jawshanDates = (jawshan.data?.done ?? []).filter((row) => row.user_id === p.id).map((row) => row.date);
         const first = list[0]?.completed_on ?? p.created_at.slice(0, 10);
         const [from, to] = periodRange(period, today, first);
-        const todayDone = new Set(list.filter((c) => c.completed_on === today && DAILY_TASKS.some((t) => t.key === c.task_key)).map((c) => c.task_key));
+        const todayDone = new Set(list.filter((c) => c.completed_on === today && dailyKeys.has(c.task_key)).map((c) => c.task_key));
         return {
           ...p,
-          points: computePoints(list, from, to),
-          pct: completionPct(list, from, to),
-          streak: currentStreak(list, today),
+          points: computePoints(list, from, to, tasks, jawshanDates),
+          pct: completionPct(list, from, to, tasks),
+          streak: currentStreak(list, today, tasks),
           todayDone,
         };
       })
       .sort((a, b) => b.points - a.points || b.pct - a.pct);
-  }, [data, period, today]);
+  }, [dailyTasks, data, jawshan.data, period, tasks, today]);
 
   const podium = [rows[1], rows[0], rows[2]];
 
@@ -113,11 +120,11 @@ function LeaderboardPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{r.avatar_emoji}</span>
                   <span className="flex-1 truncate font-medium">{r.display_name}</span>
-                  <span className="text-sm font-bold">{r.todayDone.size}/{DAILY_COUNT}</span>
+                  <span className="text-sm font-bold">{r.todayDone.size}/{dailyTasks.length}</span>
                 </div>
-                <Bar value={(r.todayDone.size / DAILY_COUNT) * 100} className="mt-2" />
+                <Bar value={dailyTasks.length === 0 ? 0 : (r.todayDone.size / dailyTasks.length) * 100} className="mt-2" />
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {DAILY_TASKS.map((t) => (
+                  {dailyTasks.map((t) => (
                     <span key={t.key} title={t.title}
                       className={`flex h-7 w-7 items-center justify-center rounded-lg text-sm ${r.todayDone.has(t.key) ? "bg-done" : "bg-muted opacity-40 grayscale"}`}>
                       {t.emoji}

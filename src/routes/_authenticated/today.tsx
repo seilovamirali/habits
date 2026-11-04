@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { ProgressRing, Bar } from "@/components/ProgressRing";
 import { Confetti } from "@/components/Confetti";
 import { BookTeaser } from "@/components/BookTeaser";
-import { meQuery, useGroup, useToday, useToggleTask } from "@/hooks/use-habits";
+import { meQuery, useGroup, useHabits, useToday, useToggleTask } from "@/hooks/use-habits";
+import { useToggleJawshan, useJawshan } from "@/hooks/use-jawshan";
 import { useMarkMessageRead, useTodayReminder, useUnreadMessages, type PersonalMessage, type DailyReminder } from "@/hooks/use-reminders";
 import {
-  DAILY_TASKS, DAILY_COUNT, WEEKLY_TASKS, computePoints, currentStreak, formatRuDate,
+  ALL_TASKS, activeDaily, activeWeekly, computePoints, currentStreak, formatRuDate,
   levelInfo, weekStart, type TaskDef,
 } from "@/lib/habits";
+import { coveredParts } from "@/lib/jawshan";
 
 export const Route = createFileRoute("/_authenticated/today")({
   component: TodayPage,
@@ -20,17 +22,28 @@ export const Route = createFileRoute("/_authenticated/today")({
 function TodayPage() {
   const { data: me } = useQuery(meQuery);
   const { data, isLoading } = useGroup();
+  const habitsQ = useHabits();
   const today = useToday();
   const toggle = useToggleTask(me?.id);
+  const jawshan = useJawshan(today);
+  const markJawshan = useToggleJawshan(me?.id, today);
+  const tasks = habitsQ.data ?? ALL_TASKS;
+  const dailyTasks = activeDaily(tasks);
+  const weeklyTasks = activeWeekly(tasks);
+  const dailyCount = dailyTasks.length;
 
   const mine = useMemo(() => (data?.completions ?? []).filter((c) => c.user_id === me?.id), [data, me]);
+  const jawshanDates = useMemo(
+    () => (jawshan.data?.done ?? []).filter((row) => row.user_id === me?.id).map((row) => row.date),
+    [jawshan.data, me?.id],
+  );
   const profile = data?.profiles.find((p) => p.id === me?.id);
   const todaySet = new Set(mine.filter((c) => c.completed_on === today).map((c) => c.task_key));
-  const doneDaily = DAILY_TASKS.filter((t) => todaySet.has(t.key)).length;
-  const pct = Math.round((doneDaily / DAILY_COUNT) * 100);
-  const points = computePoints(mine);
+  const doneDaily = dailyTasks.filter((t) => todaySet.has(t.key)).length;
+  const pct = dailyCount === 0 ? 0 : Math.round((doneDaily / dailyCount) * 100);
+  const points = computePoints(mine, "0000-01-01", "9999-12-31", tasks, jawshanDates);
   const lvl = levelInfo(points);
-  const streak = currentStreak(mine, today);
+  const streak = currentStreak(mine, today, tasks);
   const ws = weekStart(today);
   const reminder = useTodayReminder(today);
   const unread = useUnreadMessages(me?.id, today);
@@ -42,11 +55,11 @@ function TodayPage() {
     if (isLoading) return;
     const prev = prevDone.current;
     prevDone.current = doneDaily;
-    if (prev !== null && prev < DAILY_COUNT && doneDaily === DAILY_COUNT) {
+    if (prev !== null && dailyCount > 0 && prev < dailyCount && doneDaily === dailyCount) {
       setCelebrate(true);
       setTimeout(() => setCelebrate(false), 3500);
     }
-  }, [doneDaily, isLoading]);
+  }, [dailyCount, doneDaily, isLoading]);
 
   const onToggle = (t: TaskDef, done: boolean) => toggle.mutate({ key: t.key, done });
 
@@ -61,7 +74,7 @@ function TodayPage() {
             Ассаляму алейкум, {profile?.display_name ?? "…"}!
           </h1>
           <div className="mt-5 flex items-center gap-5">
-            <ProgressRing value={pct} label={`${doneDaily}/${DAILY_COUNT}`} />
+            <ProgressRing value={pct} label={`${doneDaily}/${dailyCount}`} />
             <div className="flex-1 space-y-2.5">
               <Stat label="Серия" value={`🔥 ${streak}`} />
               <Stat label="Очки" value={`✨ ${points}`} />
@@ -85,16 +98,27 @@ function TodayPage() {
           <PersonalWords messages={unread.data} onRead={(id) => markRead.mutate(id)} busy={markRead.isPending} />
         )}
 
-        {doneDaily === DAILY_COUNT && (
+        {dailyCount > 0 && doneDaily === dailyCount && (
           <div className="animate-pop rounded-2xl bg-gradient-gold p-4 text-center font-semibold text-gold-foreground shadow-gold">
             Все задания на сегодня выполнены! МашаАллах 🎉
           </div>
         )}
 
+        <JawshanToday
+          data={jawshan.data}
+          loading={jawshan.isLoading}
+          error={jawshan.isError}
+          userId={me?.id}
+          today={today}
+          busy={markJawshan.isPending || !me}
+          onToggle={(done) => markJawshan.mutate(done)}
+          onRetry={() => jawshan.refetch()}
+        />
+
         <section>
           <h2 className="font-display mb-3 text-xl font-bold">Ежедневные задания</h2>
           <div className="space-y-3">
-            {DAILY_TASKS.map((t, i) => {
+            {dailyTasks.map((t, i) => {
               const done = todaySet.has(t.key);
               if (t.key === "reading") {
                 return (
@@ -119,7 +143,7 @@ function TodayPage() {
         <section>
           <h2 className="font-display mb-3 text-xl font-bold">На этой неделе</h2>
           <div className="space-y-3">
-            {WEEKLY_TASKS.map((t) => {
+            {weeklyTasks.map((t) => {
               const weekCount = mine.filter((c) => c.task_key === t.key && c.completed_on >= ws && c.completed_on <= today).length;
               const doneToday = todaySet.has(t.key);
               const full = weekCount >= t.target;
@@ -154,6 +178,54 @@ function TodayPage() {
         <BookTeaser userId={me?.id} />
       </div>
     </div>
+  );
+}
+
+function JawshanToday({ data, loading, error, userId, today, busy, onToggle, onRetry }: {
+  data: { assignments: { date: string; user_id: string; part_from: number; part_to: number }[]; done: { date: string; user_id: string }[] } | undefined;
+  loading: boolean;
+  error: boolean;
+  userId: string | undefined;
+  today: string;
+  busy: boolean;
+  onToggle: (done: boolean) => void;
+  onRetry: () => void;
+}) {
+  const mine = data?.assignments.find((row) => row.date === today && row.user_id === userId);
+  const done = !!data?.done.some((row) => row.date === today && row.user_id === userId);
+  const covered = data ? coveredParts(data.assignments, data.done, today) : 0;
+  return (
+    <section className="rounded-2xl border border-gold/40 bg-card p-4 shadow-card">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-bold leading-snug">
+            {mine ? `Джевшен: ваши части ${mine.part_from}–${mine.part_to}` : "Джевшен"}
+          </h2>
+          {(loading || error || !mine) && (
+            <p className="mt-1 text-sm">
+              {loading ? "Считаем доли на сегодня…" : error ? "Не удалось распределить Джевшен." : "Сегодня вам не досталась доля."}
+            </p>
+          )}
+        </div>
+        <span className="text-3xl" aria-hidden>📿</span>
+      </div>
+      {!error && <p className="mt-2 text-sm text-muted-foreground">Группа прочитала {covered}/100 · +10 очков за свою долю</p>}
+      <Bar value={covered} className="mt-2" />
+      <div className="mt-3 grid grid-cols-1 gap-2">
+        {error ? (
+          <Button variant="outline" size="xl" onClick={onRetry}>Повторить</Button>
+        ) : mine ? (
+          done ? (
+            <Button variant="undo" size="xl" disabled={busy} onClick={() => onToggle(true)}>Отменить</Button>
+          ) : (
+            <Button variant="hero" size="xl" disabled={busy || loading} onClick={() => onToggle(false)}>Моя доля прочитана</Button>
+          )
+        ) : null}
+        <Button asChild variant="link" className="h-10 px-0">
+          <Link to="/jawshan">Прогресс группы</Link>
+        </Button>
+      </div>
+    </section>
   );
 }
 
