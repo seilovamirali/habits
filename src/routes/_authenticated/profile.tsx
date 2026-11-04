@@ -1,14 +1,15 @@
 
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { meQuery, useGroup, useToday } from "@/hooks/use-habits";
+import { meQuery, useGroup, useHabits, useToday } from "@/hooks/use-habits";
+import { useJawshan } from "@/hooks/use-jawshan";
 import {
-  DAILY_COUNT, addDays, bestStreak, computeBadges, computePoints, currentStreak, dailyByDay, levelInfo,
+  ALL_TASKS, activeDaily, addDays, bestStreak, computeBadges, computePoints, currentStreak, dailyByDay, levelInfo,
 } from "@/lib/habits";
 
 export const Route = createFileRoute("/_authenticated/profile")({
@@ -20,7 +21,11 @@ const EMOJIS = ["🙂", "😊", "🌙", "⭐", "🌿", "🦁", "🐎", "🦅", "
 function ProfilePage() {
   const { data: me } = useQuery(meQuery);
   const { data } = useGroup();
+  const habitsQ = useHabits();
   const today = useToday();
+  const jawshan = useJawshan(today);
+  const tasks = habitsQ.data ?? ALL_TASKS;
+  const dailyCount = activeDaily(tasks).length;
   const qc = useQueryClient();
   const navigate = useNavigate();
   const profile = data?.profiles.find((p) => p.id === me?.id);
@@ -32,10 +37,14 @@ function ProfilePage() {
   }, [profile?.id, profile?.display_name, profile?.avatar_emoji]);
 
   const mine = useMemo(() => (data?.completions ?? []).filter((c) => c.user_id === me?.id), [data, me]);
-  const points = computePoints(mine);
+  const jawshanDates = useMemo(
+    () => (jawshan.data?.done ?? []).filter((row) => row.user_id === me?.id).map((row) => row.date),
+    [jawshan.data, me?.id],
+  );
+  const points = computePoints(mine, "0000-01-01", "9999-12-31", tasks, jawshanDates);
   const lvl = levelInfo(points);
-  const badges = computeBadges(mine);
-  const byDay = dailyByDay(mine);
+  const badges = computeBadges(mine, tasks);
+  const byDay = dailyByDay(mine, tasks);
   const days = Array.from({ length: 30 }, (_, i) => addDays(today, i - 29));
 
   const save = async () => {
@@ -102,9 +111,9 @@ function ProfilePage() {
         <div className="grid grid-cols-10 gap-1.5 rounded-3xl border bg-card p-3 shadow-card">
           {days.map((d) => {
             const n = byDay.get(d) ?? 0;
-            const ratio = n / DAILY_COUNT;
+            const ratio = dailyCount === 0 ? 0 : n / dailyCount;
             return (
-              <div key={d} title={`${d}: ${n}/${DAILY_COUNT}`}
+              <div key={d} title={`${d}: ${n}/${dailyCount}`}
                 className={`flex aspect-square items-center justify-center rounded-md text-[10px] font-semibold ${d === today ? "ring-2 ring-gold" : ""} ${ratio === 0 ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground"}`}
                 style={ratio > 0 ? { opacity: 0.3 + ratio * 0.7 } : undefined}>
                 {Number(d.slice(8))}
@@ -127,6 +136,9 @@ function ProfilePage() {
         </div>
       </section>
 
+      <Button asChild variant="hero" size="xl" className="w-full">
+        <Link to="/manage">Привычки группы</Link>
+      </Button>
       <Button variant="outline" size="xl" className="mb-4 w-full" onClick={signOut}>Выйти</Button>
     </div>
   );

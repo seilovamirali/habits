@@ -16,4 +16,10 @@ describe("App routing", () => {
     const matches = router.matchRoutes("/reader");
     expect(matches.some((match) => match.routeId.includes("reader"))).toBe(true);
   });
+
+  it("matches jawshan and habit management", () => {
+    const router = createRouter({ routeTree, context: { queryClient: new QueryClient() } });
+    expect(router.matchRoutes("/jawshan").some((match) => match.routeId.includes("jawshan"))).toBe(true);
+    expect(router.matchRoutes("/manage").some((match) => match.routeId.includes("manage"))).toBe(true);
+  });
 });

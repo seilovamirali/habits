@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { almatyToday, TASK_MAP, type Completion, type TaskKey } from "@/lib/habits";
+import { almatyToday, type Completion, type TaskDef } from "@/lib/habits";
 
 export interface Profile {
   id: string;
@@ -57,6 +57,68 @@ export const meQuery = queryOptions({
   staleTime: Infinity,
 });
 
+export function errorText(err: unknown): string {
+  const raw = err instanceof Error
+    ? err.message
+    : err && typeof err === "object" && "message" in err && typeof err.message === "string"
+      ? err.message
+      : "";
+  return raw.replace(/^P0001:\s*/, "");
+}
+
+function isKnownRule(message: string): boolean {
+  return /Недельная|Можно|Отменить|привыч|Джевш|доля|Ключ/.test(message);
+}
+
+export function habitFromRow(row: {
+  key: string;
+  title: string;
+  description: string;
+  emoji: string;
+  kind: string;
+  weekly_target: number | null;
+  points: number;
+  sort_order: number;
+  archived: boolean;
+}): TaskDef {
+  return {
+    key: row.key,
+    title: row.title,
+    description: row.description,
+    emoji: row.emoji,
+    kind: row.kind === "weekly" ? "weekly" : "daily",
+    target: row.kind === "weekly" ? row.weekly_target ?? 1 : 1,
+    points: row.points,
+    sortOrder: row.sort_order,
+    archived: row.archived,
+  };
+}
+
+export function useHabits() {
+  const qc = useQueryClient();
+  useEffect(() => {
+    const channel = supabase
+      .channel(`habits-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "habits" }, () => {
+        qc.invalidateQueries({ queryKey: ["habits"] });
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [qc]);
+  return useQuery({
+    queryKey: ["habits"],
+    queryFn: async (): Promise<TaskDef[]> => {
+      const { data, error } = await supabase.from("habits").select("key,title,description,emoji,kind,weekly_target,points,sort_order,archived").order("sort_order");
+      if (error) throw error;
+      return (data ?? []).map(habitFromRow);
+    },
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useGroup() {
   const qc = useQueryClient();
   useEffect(() => {
@@ -89,7 +151,7 @@ export function useToday() {
 export function useToggleTask(userId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ key, done }: { key: TaskKey; done: boolean }) => {
+    mutationFn: async ({ key, done }: { key: string; done: boolean }) => {
       if (!userId) throw new Error("no user");
       const today = almatyToday();
       if (done) {
@@ -121,11 +183,15 @@ export function useToggleTask(userId: string | undefined) {
     },
     onError: (err, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(["group"], ctx.prev);
-      const msg = err instanceof Error ? err.message : "";
-      toast.error(msg.includes("Недельная") || msg.includes("Можно") || msg.includes("Отменить") ? msg : "Не удалось сохранить. Попробуйте ещё раз.");
+      const msg = errorText(err);
+      toast.error(isKnownRule(msg) ? msg : "Не удалось сохранить. Попробуйте ещё раз.");
     },
     onSuccess: (_d, { key, done }) => {
-      const t = TASK_MAP[key];
+      const t = qc.getQueryData<TaskDef[]>(["habits"])?.find((task) => task.key === key);
+      if (!t) {
+        toast.success(done ? "Отметка отменена" : "Сохранено");
+        return;
+      }
       if (done) toast(`${t.title}: отметка отменена`);
       else toast.success(`${t.emoji} ${t.title} — +${t.points} очков!`);
     },
